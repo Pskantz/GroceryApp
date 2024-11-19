@@ -5,7 +5,7 @@ class Program
 {
     static void Main(string[] args)
     {
-        var connString = "Host=localhost;Username=postgres;Password=yourpassword;Database=systembolaget";
+        var connString = "Host=localhost;Username=postgres;Password=asd123;Database=systembolaget";
         using var conn = new NpgsqlConnection(connString);
         conn.Open();
 
@@ -233,37 +233,55 @@ static void AddToCart(NpgsqlConnection conn, int userId)
 
 static void CompletePurchase(NpgsqlConnection conn, int userId)
 {
-    var cmd = new NpgsqlCommand(
-        @"SELECT p.product_id, c.quantity, p.price 
-          FROM cart c 
-          JOIN products p ON c.product_id = p.product_id 
-          WHERE c.user_id = @u", conn);
-    cmd.Parameters.AddWithValue("u", userId);
-
-    using var reader = cmd.ExecuteReader();
-
-    Console.WriteLine("\nKvitto för ditt köp:");
-    Console.WriteLine("Produkt | Kvantitet | Pris/st | Total");
-    decimal grandTotal = 0;
-
-    while (reader.Read())
+    try
     {
-        string productName = reader.GetString(0);
-        int quantity = reader.GetInt32(1);
-        decimal price = reader.GetDecimal(2);
-        decimal total = quantity * price;
+        var cmd = new NpgsqlCommand(
+            @"SELECT p.name, c.quantity, p.price 
+              FROM cart c 
+              JOIN products p ON c.product_id = p.product_id 
+              WHERE c.user_id = @u", conn);
+        cmd.Parameters.AddWithValue("u", userId);
 
-        Console.WriteLine($"{productName} | {quantity} | {price:C} | {total:C}");
-        grandTotal += total;
+        using var reader = cmd.ExecuteReader();
+
+        if (!reader.HasRows)
+        {
+            Console.WriteLine("Din kundvagn är tom. Ingen kan köpas.");
+            return; // Avsluta om ingen produkt finns i kundvagnen
+        }
+
+        Console.WriteLine("\nKvitto för ditt köp:");
+        Console.WriteLine("Produkt | Kvantitet | Pris/st | Total");
+
+        decimal grandTotal = 0;
+
+        // Läs varje rad från kundvagnen och visa information om produkterna
+        while (reader.Read())
+        {
+            string productName = reader.GetString(0); // Produktnamn från 'products' tabell
+            int quantity = reader.GetInt32(1);        // Kvantitet från 'cart' tabell
+            decimal price = reader.GetDecimal(2);     // Pris per styck från 'products' tabell
+            decimal total = quantity * price;         // Totalpris för denna produkt
+
+            Console.WriteLine($"{productName} | {quantity} | {price:C} | {total:C}");
+            grandTotal += total; // Lägg till totala priset för denna produkt till grandTotal
+        }
+
+        reader.Close(); // Stäng läsaren
+
+        // Töm kundvagnen efter köp
+        var clearCartCmd = new NpgsqlCommand("DELETE FROM cart WHERE user_id = @u", conn);
+        clearCartCmd.Parameters.AddWithValue("u", userId);
+        clearCartCmd.ExecuteNonQuery(); // Utför borttagningen
+
+        // Visa det totala beloppet
+        Console.WriteLine($"Totalt belopp att betala: {grandTotal:C}");
+        Console.WriteLine("Tack för ditt köp!");
     }
-    reader.Close();
-
-    // Clear cart after purchase
-    var clearCartCmd = new NpgsqlCommand("DELETE FROM cart WHERE user_id = @u", conn);
-    clearCartCmd.Parameters.AddWithValue("u", userId);
-    clearCartCmd.ExecuteNonQuery();
-
-    Console.WriteLine($"Totalt belopp att betala: {grandTotal:C}");
-    Console.WriteLine("Tack för ditt köp!");
+    catch (Exception ex)
+    {
+        // Fångar alla fel och skriver ut dem
+        Console.WriteLine($"Ett fel uppstod vid köpet: {ex.Message}");
+    }
 }
 }
